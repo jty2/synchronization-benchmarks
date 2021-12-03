@@ -1,5 +1,6 @@
 # override keyword overwrites make command-line option LSE_ENABLE=y, therefore it has been removed
-CFLAGS += -g -O3 -I. -I./include -I../../ext/mysql/include -I../../ext/linux/include -I../../ext/tbb/include -I../../ext/sms/base
+CFLAGS += -g -O3 -Wall -I. -I./include -I../../ext/mysql/include -I../../ext/linux/include -I../../ext/tbb/include -I../../ext/sms/base
+CC = gcc
 
 ifneq ($(DEBUG_LEVEL),)
 ifeq ($(shell test $(DEBUG_LEVEL) -gt 0; echo $$?),0)
