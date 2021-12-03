@@ -184,6 +184,7 @@ static struct timespec* compute_abstime(struct timespec* abstime,
 
     struct timespec now;
     int status = clock_gettime(CLOCK_MONOTONIC, &now);
+    (void) status;
     abstime->tv_sec = now.tv_sec  + seconds;
     long nanos = now.tv_nsec + millis * NANOSECS_PER_MILLISEC;
     if (nanos >= NANOSECS_PER_SEC) {
@@ -298,6 +299,7 @@ void unparkObjectWaiter(struct ObjectWaiter *node) {
         return;
     }
     int status = pthread_mutex_lock(&node->_mutex);
+    (void) status;
     int AnyWaiters = node->_nParked;
     pthread_mutex_unlock(&node->_mutex);
     if (AnyWaiters != 0) {
@@ -718,6 +720,7 @@ static void jvmObjectMonitorExit(pthread_t thisThread) {
 
         struct ObjectWaiter *w = NULL;
         int QMode = Knob_QMode;
+	(void) QMode;
         /* Bunch of experimental stuff handling various QMode settings
          * removed for simplification -- never gets executed here...
          */
