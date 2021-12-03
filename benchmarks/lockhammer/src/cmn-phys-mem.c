@@ -132,37 +132,40 @@ int parse_cmn_hash_select_mode(const char * optarg) {
 
 uintptr_t get_phys_addr(uintptr_t vaddr) {
 
-     uintptr_t paddr = 0;
+    uintptr_t paddr = 0;
 
-     static unsigned long PAGESIZE = 1;
-     static unsigned long PAGE_MASK = 1;
+    static unsigned long PAGESIZE = 1;
+    static unsigned long PAGE_MASK = 1;
 
-     static unsigned long last_vpage = 1;	// ensure mismatch
-     static unsigned long last_ppage = 1;
+    static unsigned long last_vpage = 1;	// ensure mismatch
+    static unsigned long last_ppage = 1;
 
-     if (PAGESIZE == 1) {
-          PAGESIZE = sysconf(_SC_PAGESIZE);
-          PAGE_MASK = ~(PAGESIZE - 1);
-     }
+    if (PAGESIZE == 1) {
+         PAGESIZE = sysconf(_SC_PAGESIZE);
+         PAGE_MASK = ~(PAGESIZE - 1);
+    }
 
-     //	printf("pid = %d, vaddr = %zx\n", pid, vaddr);
-     //	printf("vaddr & PAGE_MASK = %zx\n", vaddr & PAGE_MASK);
-     //	printf("last_vpage        = %zx\n", last_vpage);
+//     pid_t pid = getpid();
+//     printf("pid = %d, vaddr = %lx\n", pid, vaddr);
+//     printf("vaddr & PAGE_MASK = %lx\n", vaddr & PAGE_MASK);
+//     printf("last_vpage        = %lx\n", last_vpage);
+//     printf("last_ppage        = %lx\n", last_ppage);
 
-     if ((vaddr & PAGE_MASK) == last_vpage) {
-          return last_ppage | (vaddr & ~PAGE_MASK);
-     }
+    if ((vaddr & PAGE_MASK) == last_vpage) {
+        return last_ppage | (vaddr & ~PAGE_MASK);
+    }
 
     if (geteuid() == 0) {
-         pid_t pid = getpid();	// this process ID
-         if (lkmc_pagemap_virt_to_phys_user(&paddr, pid, vaddr)) {
-              fprintf(stderr, "error: virt_to_phys_user\n");
-              return EXIT_FAILURE;
-         }
-         last_vpage = vaddr & PAGE_MASK;
-         last_ppage = paddr & PAGE_MASK;
+        pid_t pid = getpid();	// this process ID
+        if (lkmc_pagemap_virt_to_phys_user(&paddr, pid, vaddr)) {
+            fprintf(stderr, "error: virt_to_phys_user\n");
+            return EXIT_FAILURE;
+        }
 
-         return paddr;
+        last_vpage = vaddr & PAGE_MASK;
+        last_ppage = paddr & PAGE_MASK;
+
+        return paddr;
     }
 
     fprintf(stderr, "didn't expect to get here in get_phys_addr, not running as root?\n");
@@ -176,6 +179,7 @@ uintptr_t get_phys_addr(uintptr_t vaddr) {
 int mem_is_on_target(int select_mode, unsigned long target_select, void * p) {
         unsigned long vaddr = (uintptr_t) p;
         size_t paddr = get_phys_addr(vaddr);
+//	printf("vaddr = %zx, paddr = %zx\n", vaddr, paddr);
         unsigned long select;
         switch (select_mode) {
                case 6: select = calculate_select6(paddr); break;
@@ -186,5 +190,19 @@ int mem_is_on_target(int select_mode, unsigned long target_select, void * p) {
                case 1: select = calculate_select1(paddr); break;
                default:  fprintf(stderr, "unknown select mode %d\n", select_mode); exit(-1);
         }
+//	printf("select = %lu (0x%lx)\n", select, select);
         return select == target_select;
+}
+
+
+unsigned long (*return_select_function(int select_mode))(unsigned long) {
+        switch (select_mode) {
+               case 6: return calculate_select6; break;
+               case 5: return calculate_select5; break;
+               case 4: return calculate_select4; break;
+               case 3: return calculate_select3; break;
+               case 2: return calculate_select2; break;
+               case 1: return calculate_select1; break;
+               default:  fprintf(stderr, "unknown select mode %d\n", select_mode); exit(-1);
+        }
 }

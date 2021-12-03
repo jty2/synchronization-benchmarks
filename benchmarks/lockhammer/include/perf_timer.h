@@ -182,7 +182,7 @@ get_raw_counter(void) {
 static inline uint64_t __attribute__((always_inline))
 get_cntvct_el0(void) {
     uint64_t t;
-    asm volatile ("mrs %0, cntvct_el0" : "=r" (t));
+    asm volatile ("ISB; mrs %0, cntvct_el0" : "=r" (t));
     return t;
 }
 

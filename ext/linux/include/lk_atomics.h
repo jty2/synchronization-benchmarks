@@ -28,8 +28,10 @@ typedef int16_t __s16;
 typedef uint16_t __u16;
 typedef int32_t __s32;
 typedef uint32_t __u32;
+#ifndef _ASM_GENERIC_INT_LL64_H
 typedef int64_t __s64;
 typedef uint64_t __u64;
+#endif
 
 typedef int8_t s8;
 typedef uint8_t u8;
@@ -248,13 +250,186 @@ static inline uint16_t xchg_release16(uint16_t *ptr, uint16_t val) {
 	return val;
 }
 
+/* -----------------  */
+
+#if defined(__aarch64__)
+#define __stringify_1(x...)     #x
+#define __stringify(x...)       __stringify_1(x)
+
+#define wfe()              asm volatile("wfe" : : : "memory")
+
+#define isb()              asm volatile("isb" : : : "memory")
+
+/*
+ * Unlike read_cpuid, calls to read_sysreg are never expected to be
+ * optimized away or replaced with synthetic values.
+ */
+#define read_sysreg(r) ({                                       \
+        u64 __val;                                              \
+        asm volatile("mrs %0, " __stringify(r) : "=r" (__val)); \
+        __val;                                                  \
+})
+
+
+
+/*
+ * Ensure that reads of the counter are treated the same as memory reads
+ * for the purposes of ordering by subsequent memory barriers.
+ *
+ * This insanity brought to you by speculative system register reads,
+ * out-of-order memory accesses, sequence locks and Thomas Gleixner.
+ *
+ * http://lists.infradead.org/pipermail/linux-arm-kernel/2019-February/631195.html
+ */
+#define arch_counter_enforce_ordering(val) do {                         \
+        u64 tmp, _val = (val);                                          \
+                                                                        \
+        asm volatile(                                                   \
+        "       eor     %0, %1, %1\n"                                   \
+        "       add     %0, sp, %0\n"                                   \
+        "       ldr     xzr, [%0]"                                      \
+        : "=r" (tmp) : "r" (_val));                                     \
+} while (0)
+
+
+static __always_inline u64 __arch_counter_get_cntvct(void)
+{
+        u64 cnt;
+
+        isb();
+        cnt = read_sysreg(cntvct_el0);
+        arch_counter_enforce_ordering(cnt);
+        return cnt;
+}
+
+
+static inline u64 get_cycles(void) {
+	return __arch_counter_get_cntvct();
+}
+
+#if 0
+#define USECS_TO_CYCLES(time_usecs)                     \
+        xloops_to_cycles((time_usecs) * 0x10C7UL)
+
+
+
+
+static inline unsigned long xloops_to_cycles(unsigned long xloops)
+{
+#if 1
+	unsigned long loops_per_jiffy, cntfrq;
+	asm ("mrs %0, cntfrq_el0" : "=r" (cntfrq));	// cycles per second
+	return;		// XXX: incomplete
+#else
+        return (xloops * loops_per_jiffy * HZ) >> 32;
+#endif
+}
+
+// TODO: enable if possible
+
+static int arch_timer_evtstrm_available(void) {
+	return 0;
+}
+
+// this delay function is the crux of the problem.  we are trying to replace cpu_relax() in osq_lock with udelay() or ndelay(), but these functions
+// use cpu_relax() in the inner loop.
+
+#if 0
+void __delay(unsigned long cycles)
+{
+        cycles_t start = get_cycles();
+
+        if (arch_timer_evtstrm_available()) {
+                const cycles_t timer_evt_period =
+                        USECS_TO_CYCLES(ARCH_TIMER_EVT_STREAM_PERIOD_US);
+
+                while ((get_cycles() - start + timer_evt_period) < cycles)
+                        wfe();
+        }
+
+        while ((get_cycles() - start) < cycles)
+                cpu_relax();
+}
+EXPORT_SYMBOL(__delay);
+#endif
+
+inline void __const_udelay(unsigned long xloops)
+{
+        __delay(xloops_to_cycles(xloops));
+}
+EXPORT_SYMBOL(__const_udelay);
+#endif
+
+//void __udelay(unsigned long usecs)
+void __udelay(unsigned long delay_cycles)
+{
+#if 0
+        __const_udelay(usecs * 0x10C7UL); /* 2**32 / 1000000 (rounded up) */
+#else
+#if 0
+	// XXX; this is not optimal, could use magic num division
+	unsigned long cntfrq;
+	asm ("mrs %0, cntfrq_el0" : "=r" (cntfrq));	// cycles per second
+
+	unsigned long cycles = usecs * cntfrq / 1e6;
+	printf("__udelay usecs=%lu, cycles=%lu\n", usecs, cycles);
+#endif
+	unsigned long cycles_start = get_cycles();
+	unsigned long cycles_end = delay_cycles + cycles_start;
+
+	while (get_cycles() < cycles_end)
+		asm volatile ("yield");
+
+
+#endif
+}
+//EXPORT_SYMBOL(__udelay);
+
+//void __ndelay(unsigned long nsecs)
+void __ndelay(unsigned long delay_cycles)
+{
+#if 0
+        __const_udelay(nsecs * 0x5UL); /* 2**32 / 1000000000 (rounded up) */
+#else
+#if 0
+	unsigned long cntfrq;
+	asm ("mrs %0, cntfrq_el0" : "=r" (cntfrq));	// cycles per second
+
+	unsigned long cycles = nsecs * cntfrq / 1e9;
+	printf("__ndelay nsecs=%lu, cycles=%lu\n", nsecs, cycles);
+#endif
+	unsigned long cycles_start = get_cycles();
+	unsigned long cycles_end = delay_cycles + cycles_start;
+
+	while (get_cycles() < cycles_end)
+		asm volatile ("yield");
+
+#endif
+}
+//EXPORT_SYMBOL(__ndelay);
+#endif /* __aarch64__ */
+
+
+/* ------------------- */
 static inline void cpu_relax (void) {
 #if defined(__x86_64__)
 	asm volatile ("pause" : : : "memory" );
+#elif defined (__aarch64__) && defined(RELAX_IS_UDELAY)
+	__udelay(delay_cycles_for_cpu_relax);
+#elif defined (__aarch64__) && defined(RELAX_IS_NDELAY)
+	__ndelay(delay_cycles_for_cpu_relax);
+#elif defined (__aarch64__) && defined(RELAX_IS_ISBYIELD)
+	asm volatile ("isb ; yield" : : : "memory" );
+#elif defined (__aarch64__) && defined(RELAX_IS_ISB14)
+	asm volatile ("isb #14" : : : "memory" );
 #elif defined (__aarch64__) && defined(RELAX_IS_ISB)
 	asm volatile ("isb" : : : "memory" );
-#elif defined (__aarch64__)
+#elif defined (__aarch64__) && defined(RELAX_IS_YIELD)
 	asm volatile ("yield" : : : "memory" );
+#elif defined (__aarch64__) && defined(RELAX_IS_NOP)
+	asm volatile ("nop" : : : "memory");
+#elif defined (__aarch64__) && defined(RELAX_IS_EMPTY)
+	asm volatile ("" : : : "memory");
 #endif
 }
 

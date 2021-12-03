@@ -53,7 +53,7 @@ struct thread_args {
     unsigned long ileave;
     unsigned long iter;
     unsigned long *lock;
-    unsigned long *rst;
+    unsigned long *rst;	    // nlocks acquired
     unsigned long *nsec;
     unsigned long *real_nsec;
     unsigned long *depth;
@@ -62,6 +62,24 @@ struct thread_args {
     Units hold_unit, post_unit;
     double tickspns;
     int *pinorder;
+
+    unsigned long run_limit_ticks;
+    unsigned long run_limit_inner_loop_iters;
+
+    unsigned long * cntvct_start;
+    unsigned long * cntvct_end;
+
+    unsigned long * cntvct_10p;
+    unsigned long * cntvct_25p;
+    unsigned long * cntvct_50p;
+    unsigned long * cntvct_75p;
+    unsigned long * cntvct_90p;
+
+    unsigned long * posq_lock_wait_next_spins;
+    unsigned long * posq_unlock_wait_next_spins;
+    unsigned long * posq_lock_locked_spins;
+    unsigned long * posq_lock_unqueue_spins;
+    unsigned long * posq_lock_acquire_backoffs;
 };
 typedef struct thread_args thread_args;
 

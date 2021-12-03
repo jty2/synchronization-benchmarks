@@ -81,6 +81,7 @@ int lkmc_pagemap_virt_to_phys_user(uintptr_t *paddr, pid_t pid, uintptr_t vaddr)
         return 1;
     }
     close(pagemap_fd);
+//    printf("entry.pfn = %lx\n", entry.pfn);
     *paddr = (entry.pfn * sysconf(_SC_PAGE_SIZE)) + (vaddr % sysconf(_SC_PAGE_SIZE));
     return 0;
 }
