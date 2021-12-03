@@ -74,18 +74,18 @@ void lock_signal(void)
 
                uint64_t lockValue;
 
-               __asm__ __volatile__ ("ldaxr %[lockValue],[%[lockAddr]]"
-                                      : [lockValue] "=r" (lockValue)
-                                      : [lockAddr] "r" (lock)
+               __asm__ __volatile__ ("ldaxr %[lockValue],%[lockAddr]"
+                                      : [lockValue] "=&r" (lockValue)
+                                      : [lockAddr] "Q" (lock)
                                       :"memory");
                if (lockValue != MUTEX_STATE_UNLOCKED)
                    return 0;
 
                uint32_t exResult;
 
-               __asm__ __volatile__ ("stxr %w[exResult], %[lockValue],[%[lockAddr]]"
-                                       : [exResult] "=r" (exResult)
-                                       : [lockAddr] "r" (lock), [lockValue] "r" (MUTEX_STATE_LOCKED)
+               __asm__ __volatile__ ("stxr %w[exResult], %[lockValue],%[lockAddr]"
+                                       : [exResult] "=&r" (exResult)
+                                       : [lockAddr] "Q" (lock), [lockValue] "r" (MUTEX_STATE_LOCKED)
                                        :"memory");
 
                return exResult == 0;
@@ -101,9 +101,9 @@ void lock_signal(void)
 	void tas_unlock(uint64_t *lock)
 	{
             #if defined(__aarch64__)
-               __asm__ __volatile__ ("stlr %[lockValue],[%[lockAddr]]"
+               __asm__ __volatile__ ("stlr %[lockValue],%[lockAddr]"
                                       :
-                                      : [lockAddr] "r" (lock), [lockValue] "r" (MUTEX_STATE_UNLOCKED)
+                                      : [lockAddr] "Q" (lock), [lockValue] "r" (MUTEX_STATE_UNLOCKED)
                                       :"memory");
                os_wmb;
             #else
