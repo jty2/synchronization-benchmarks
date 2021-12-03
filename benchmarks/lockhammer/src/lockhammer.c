@@ -97,7 +97,6 @@ int main(int argc, char** argv)
     {
         long optval = 0;
         int len = 0;
-        char buf[128];
         char *csv = NULL;
         switch (opt) {
           case 't':
@@ -349,7 +348,6 @@ void* hmr(void *ptr)
     unsigned long nthrds = x->nthrds;
     unsigned long hold_count = x->hold;
     unsigned long post_count = x->post;
-    double tickspns = x->tickspns;
     int *pinorder = x->pinorder;
 
     unsigned long mycore = 0;
