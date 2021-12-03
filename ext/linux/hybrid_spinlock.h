@@ -93,7 +93,7 @@ unsigned long hybrid_spinlock_slowpath(uint64_t *lock, unsigned long threadnum)
 	unsigned long depth = 0;
 	struct mcs_spinlock *prev, *next, *node;
 
-	u32 new, old, tail, val, ticketval;
+	u32 /* new, */ old, tail, val, ticketval;
 
 	int idx;
 
@@ -124,7 +124,7 @@ unsigned long hybrid_spinlock_slowpath(uint64_t *lock, unsigned long threadnum)
 
 	/* do ticket spin */
 #if defined(__aarch64__)
-	unsigned tmp, tmp2, tmp3;
+	unsigned /* tmp, */ tmp2, tmp3;
 asm volatile (
 "5:	ldaxr	%w[ticket], %[lock]\n"
 "	add	%w[tmp2], %w[ticket], %w[ticket_inc]\n"
@@ -185,7 +185,7 @@ unsigned long __attribute__((noinline)) lock_acquire (uint64_t *lock, unsigned l
 	unsigned enqueue;
 
 #if defined(__aarch64__)
-	unsigned tmp, tmp2, tmp3;
+	unsigned /* tmp, */ tmp2, tmp3;
 asm volatile (
 "1:	ldaxr	%w[ticket], %[lock]\n"
 "	add	%w[tmp2], %w[ticket], %w[ticket_inc]\n"
