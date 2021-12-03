@@ -98,6 +98,11 @@ int main(int argc, char** argv)
     int cmn_hash_select_mode = 0;
     int target_hnf = 0;
 
+    // get the set of online cores
+    cpu_set_t online_cores;
+    CPU_ZERO(&online_cores);
+    sched_getaffinity(0, sizeof(cpu_set_t), &online_cores);
+
     num_cores = sysconf(_SC_NPROCESSORS_ONLN);
 
     /* Set defaults for all command line options */
@@ -205,10 +210,9 @@ int main(int argc, char** argv)
                 optval = strtol(csv, (char **) NULL, 10);
                 /* Some Arm systems may have core number larger than total cores number */
                 args.pinorder[i] = optval;
-                // XXX: num_cores is the quantity of online cores, so this is not a reliable
-                // check if a specified core number is online or not.
-                if (optval < 0 || optval > num_cores) {
-                    fprintf(stderr, "WARNING: core number %ld is out of range.\n", optval);
+
+		if (! CPU_ISSET(optval, &online_cores)) {
+                    fprintf(stderr, "WARNING: core number %ld specified in -o is not online.\n", optval);
                 }
                 csv = strtok(NULL, ",:");
             }
