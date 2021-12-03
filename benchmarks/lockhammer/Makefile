@@ -2,28 +2,31 @@
 CFLAGS += -g -O3 -Wall -I. -I./include -I../../ext/mysql/include -I../../ext/linux/include -I../../ext/tbb/include -I../../ext/sms/base
 CC = gcc
 
+# Debug level
 ifneq ($(DEBUG_LEVEL),)
 ifeq ($(shell test $(DEBUG_LEVEL) -gt 0; echo $$?),0)
 CFLAGS+=-DDEBUG
 endif
+
 ifeq ($(shell test $(DEBUG_LEVEL) -gt 1; echo $$?),0)
 CFLAGS+=-DDDEBUG
 endif
 endif
+
+
 # LSE support is experimental, please enable the below CFLAGS with caution
-ifneq ($(LSE_ENABLE),)
+ifeq ($(LSE_ENABLE),1)
 CFLAGS+=-march=armv8-a+lse -DUSE_LSE
 endif
+
+
 # Use builtin atomics instead of arch specific, if available
-ifneq ($(USE_BUILTIN),)
+ifeq ($(USE_BUILTIN),1)
 CFLAGS+=-DUSE_BUILTIN
 endif
 
 
 LDFLAGS=-lpthread -lm
-
-lh_%: tests/%.h include/atomics.h src/lockhammer.c 
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
 
 TARGET_ARCH:=$(shell ${CC} -dumpmachine | cut -d '-' -f 1)
 
@@ -46,37 +49,75 @@ ifeq ($(TARGET_ARCH),aarch64)
 		lh_hybrid_spinlock_fastdequeue
 endif
 
-all: ${TEST_TARGETS}
+ifeq ($(USE_BUILTIN),1)
 
-lh_event_mutex: ../../ext/mysql/event_mutex.h include/atomics.h ../../ext/mysql/include/ut_atomics.h src/lockhammer.c
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+ifeq ($(LSE_ENABLE),1)
+BUILD=build.lse.builtin
+else
+BUILD=build.builtin
+endif
 
-lh_cas_event_mutex: ../../ext/mysql/cas_event_mutex.h include/atomics.h ../../ext/mysql/include/ut_atomics.h src/lockhammer.c
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+else
 
-lh_ticket_spinlock: ../../ext/linux/ticket_spinlock.h include/atomics.h ../../ext/linux/include/lk_atomics.h src/lockhammer.c
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+ifeq ($(LSE_ENABLE),1)
+BUILD=build.lse
+else
+BUILD=build
+endif
 
-lh_hybrid_spinlock: ../../ext/linux/hybrid_spinlock.h include/atomics.h ../../ext/linux/include/lk_atomics.h src/lockhammer.c
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+endif
 
-lh_hybrid_spinlock_fastdequeue: ../../ext/linux/hybrid_spinlock_fastdequeue.h include/atomics.h ../../ext/linux/include/lk_atomics.h src/lockhammer.c
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+ALL_BINARIES = $(addprefix $(BUILD)/,$(TEST_TARGETS))
 
-lh_osq_lock: ../../ext/linux/osq_lock.h ../../ext/linux/include/lk_atomics.h ../../ext/linux/include/lk_barrier.h ../../ext/linux/include/lk_cmpxchg.h include/atomics.h src/lockhammer.c
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+C_SRC = src/lockhammer.c
 
-lh_clh_spinlock: ../../ext/sms/clh_spinlock.h ../../ext/sms/base/build_config.h ../../ext/sms/base/cpu.h ../../ext/sms/base/llsc.h src/lockhammer.c
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+all: $(BUILD) $(ALL_BINARIES)
 
-lh_queued_spinlock: ../../ext/linux/queued_spinlock.h include/atomics.h ../../ext/linux/include/lk_atomics.h src/lockhammer.c
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+allvariants:
+	make USE_BUILTIN=0 LSE_ENABLE=0
+	make USE_BUILTIN=1 LSE_ENABLE=0
+ifeq ($(TARGET_ARCH),aarch64)
+	make USE_BUILTIN=0 LSE_ENABLE=1
+	make USE_BUILTIN=1 LSE_ENABLE=1
+endif
 
-lh_jvm_objectmonitor: ../../ext/jvm/jvm_objectmonitor.h include/atomics.h src/lockhammer.c
-	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+$(BUILD):
+	mkdir -p $@
 
-lh_tbb_spin_rw_mutex: ../../ext/tbb/tbb_spin_rw_mutex.h ../../ext/tbb/include/tbb.h include/atomics.h src/lockhammer.c
-	${CC} ${CFLAGS} -DNDEBUG -DATOMIC_TEST=\"$<\" src/lockhammer.c -o build/$@ ${LDFLAGS}
+$(BUILD)/lh_event_mutex: ../../ext/mysql/event_mutex.h include/atomics.h ../../ext/mysql/include/ut_atomics.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_cas_event_mutex: ../../ext/mysql/cas_event_mutex.h include/atomics.h ../../ext/mysql/include/ut_atomics.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_ticket_spinlock: ../../ext/linux/ticket_spinlock.h include/atomics.h ../../ext/linux/include/lk_atomics.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_hybrid_spinlock: ../../ext/linux/hybrid_spinlock.h include/atomics.h ../../ext/linux/include/lk_atomics.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_hybrid_spinlock_fastdequeue: ../../ext/linux/hybrid_spinlock_fastdequeue.h include/atomics.h ../../ext/linux/include/lk_atomics.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_osq_lock: ../../ext/linux/osq_lock.h ../../ext/linux/include/lk_atomics.h ../../ext/linux/include/lk_barrier.h ../../ext/linux/include/lk_cmpxchg.h include/atomics.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_clh_spinlock: ../../ext/sms/clh_spinlock.h ../../ext/sms/base/build_config.h ../../ext/sms/base/cpu.h ../../ext/sms/base/llsc.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_queued_spinlock: ../../ext/linux/queued_spinlock.h include/atomics.h ../../ext/linux/include/lk_atomics.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_jvm_objectmonitor: ../../ext/jvm/jvm_objectmonitor.h include/atomics.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_tbb_spin_rw_mutex: ../../ext/tbb/tbb_spin_rw_mutex.h ../../ext/tbb/include/tbb.h include/atomics.h $(C_SRC) | $(BUILD)
+	${CC} ${CFLAGS} -DNDEBUG -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
+$(BUILD)/lh_%: tests/%.h include/atomics.h $(C_SRC) | $(BUILD)
+	@echo using generic rule for $@
+	${CC} ${CFLAGS} -DATOMIC_TEST=\"$<\" $(C_SRC) -o $@ ${LDFLAGS}
+
 
 clean:
-	rm -f build/lh_*
+	rm -f $(ALL_BINARIES)
