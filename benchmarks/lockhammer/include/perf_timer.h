@@ -367,22 +367,25 @@ int64_t  __attribute__((noinline, optimize("no-unroll-loops"))) evaluate_blackho
         const unsigned long tokens_mid, const unsigned long NUMTRIES)
 {
     unsigned long i, j;
-    int64_t outer_cycles_start, outer_cycles_end;
     int64_t sum_elapsed_total = 0;
     int64_t avg_elapsed_total = 0;
+#ifdef DDEBUG
+    int64_t outer_cycles_start, outer_cycles_end;
     int64_t outer_elapsed_total;
     int64_t outer_inner_diff;
     int64_t elapsed_total_diff;
     double percent;
-
     int64_t LOOP_TEST_OVERHEAD = evaluate_loop_overhead(NUMTRIES);
+#endif
     int64_t TIMER_OVERHEAD = evaluate_timer_overhead();
 
     for (j = 0; j < NUMTRIES; j++) {
 
         int64_t elapsed_total = 0;
 
+#ifdef DDEBUG
         outer_cycles_start = timer_get_counter_start();
+#endif
         for (i = 0; i < NUMTRIES; i++) {
 
             uint64_t cycles_start, cycles_end;
@@ -395,18 +398,22 @@ int64_t  __attribute__((noinline, optimize("no-unroll-loops"))) evaluate_blackho
 
             elapsed_total += elapsed;
         }
+#ifdef DDEBUG
         outer_cycles_end = timer_get_counter_end();
+#endif
 
+#ifdef DDEBUG
         outer_elapsed_total = outer_cycles_end - outer_cycles_start;
         outer_inner_diff = abs(outer_elapsed_total - elapsed_total);
+#endif
 
         // Force measurements to zero if overhead swamps loop run time, in this
         // case we can't measure this low of a requested time accurately.
         sum_elapsed_total += MAX((int64_t)(elapsed_total - TIMER_OVERHEAD*NUMTRIES), 0);
         avg_elapsed_total = sum_elapsed_total / (j + 1);
-        elapsed_total_diff = abs(avg_elapsed_total - elapsed_total);
 
 #ifdef DDEBUG
+        elapsed_total_diff = abs(avg_elapsed_total - elapsed_total);
         if (outer_inner_diff > LOOP_TEST_OVERHEAD) {
             percent = outer_inner_diff / (double) LOOP_TEST_OVERHEAD;
         } else {
