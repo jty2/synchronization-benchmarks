@@ -459,7 +459,7 @@ void* hmr(void *ptr)
          * which allows 0 to serve as don't care mask and only changing the
          * pinning order we want to change for specific -i interleave mode.
          */
-        if (pinorder && pinorder[mycore]) {
+        if (pinorder) {
 #ifdef DEBUG
             printf("pinorder[%lu] = %d, locks->sync_lock = %lu\n", mycore, pinorder[mycore], locks->sync_lock);
 #endif
