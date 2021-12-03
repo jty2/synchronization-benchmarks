@@ -931,6 +931,16 @@ static bool osq_lock(uint64_t *osq, unsigned long thread_number)
      */
 
 #if defined(USE_SMP_COND_LOAD_RELAXED)
+        /*
+         * Wait to acquire the lock or cancellation. Note that need_resched()
+         * will come with an IPI, which will wake smp_cond_load_relaxed() if it
+         * is implemented with a monitor-wait. vcpu_is_preempted() relies on
+         * polling, be careful.
+         */
+
+    // INCREMENT_COUNTER(osq_lock_locked_spins) is embedded in smp_cond_load_relaxed macro. see include/lk_atomics.h
+
+
     if (smp_cond_load_relaxed(&node->locked, VAL || (++back_off > unqueue_retry)))
 	return true;
 #else
@@ -967,9 +977,9 @@ static bool osq_lock(uint64_t *osq, unsigned long thread_number)
         INCREMENT_COUNTER(osq_lock_locked_spins);
     }
     return true;		// we got the lock
-#endif
 
 unqueue:
+#endif
 
     //
     // If we are here, we polled node->locked for unqueue_retry number of times

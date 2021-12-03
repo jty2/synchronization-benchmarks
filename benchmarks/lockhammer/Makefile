@@ -71,6 +71,12 @@ CFLAGS+=-DRELAX_IS_EMPTY
 endif
 
 
+# osq_lock - USE_SMP_COND_LOAD_RELAXED for primary loop
+# -----------------------------------------------------
+
+ifeq ($(USE_SMP_COND_LOAD_RELAXED),1)
+CFLAGS+=-DUSE_SMP_COND_LOAD_RELAXED
+endif
 
 
 LDFLAGS=-pthread -lm -g -static
@@ -109,6 +115,10 @@ ifeq ($(USE_BUILTIN),1)
 BUILD:=$(BUILD).builtin
 endif
 
+ifeq ($(USE_SMP_COND_LOAD_RELAXED),1)
+BUILD:=$(BUILD).cond_load
+endif
+
 ifeq ($(RELAX),YIELD)
 BUILD:=$(BUILD).relax_is_yield
 else ifeq ($(RELAX),ISB)
@@ -130,7 +140,10 @@ endif
 
 ALL_VARIANTS = \
 builtin_0.lse_0 \
-builtin_1.lse_0
+builtin_1.lse_0 \
+builtin_0.lse_0.cond_load \
+builtin_1.lse_0 \
+builtin_1.lse_0.cond_load
 
 ifeq ($(TARGET_ARCH),aarch64)
 ALL_VARIANTS += \
@@ -143,7 +156,17 @@ builtin_1.lse_1.relax_empty \
 builtin_1.lse_1.relax_isb14 \
 builtin_1.lse_1.relax_isbyield \
 builtin_1.lse_1.relax_ndelay \
-builtin_1.lse_1.relax_udelay
+builtin_1.lse_1.relax_udelay \
+builtin_0.lse_1.cond_load \
+builtin_1.lse_1.cond_load \
+builtin_1.lse_1.cond_load.relax_yield \
+builtin_1.lse_1.cond_load.relax_isb \
+builtin_1.lse_1.cond_load.relax_nop \
+builtin_1.lse_1.cond_load.relax_empty \
+builtin_1.lse_1.cond_load.relax_isb14 \
+builtin_1.lse_1.cond_load.relax_isbyield \
+builtin_1.lse_1.cond_load.relax_ndelay \
+builtin_1.lse_1.cond_load.relax_udelay
 endif
 
 CLEAN_ALL_VARIANTS = $(addprefix clean.,$(ALL_VARIANTS))
@@ -165,8 +188,14 @@ cleanallvariants: $(CLEAN_ALL_VARIANTS)
 builtin_0.lse_0:
 	$(MAKE) USE_BUILTIN=0 LSE_ENABLE=0
 
+builtin_0.lse_0.cond_load:
+	$(MAKE) USE_BUILTIN=0 LSE_ENABLE=0 USE_SMP_COND_LOAD_RELAXED=1
+
 builtin_1.lse_0:
 	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=0
+
+builtin_1.lse_0.cond_load:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=0 USE_SMP_COND_LOAD_RELAXED=1
 
 ifeq ($(TARGET_ARCH),aarch64)
 builtin_0.lse_1:
@@ -198,6 +227,37 @@ builtin_1.lse_1.relax_ndelay:
 
 builtin_1.lse_1.relax_udelay:
 	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=UDELAY
+
+
+builtin_0.lse_1.cond_load:
+	$(MAKE) USE_BUILTIN=0 LSE_ENABLE=1 USE_SMP_COND_LOAD_RELAXED=1
+
+builtin_1.lse_1.cond_load:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 USE_SMP_COND_LOAD_RELAXED=1
+
+builtin_1.lse_1.cond_load.relax_yield:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=YIELD USE_SMP_COND_LOAD_RELAXED=1
+
+builtin_1.lse_1.cond_load.relax_isb:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=ISB USE_SMP_COND_LOAD_RELAXED=1
+
+builtin_1.lse_1.cond_load.relax_nop:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=NOP USE_SMP_COND_LOAD_RELAXED=1
+
+builtin_1.lse_1.cond_load.relax_empty:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=EMPTY USE_SMP_COND_LOAD_RELAXED=1
+
+builtin_1.lse_1.cond_load.relax_isb14:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=ISB14 USE_SMP_COND_LOAD_RELAXED=1
+
+builtin_1.lse_1.cond_load.relax_isbyield:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=ISBYIELD USE_SMP_COND_LOAD_RELAXED=1
+
+builtin_1.lse_1.cond_load.relax_ndelay:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=NDELAY USE_SMP_COND_LOAD_RELAXED=1
+
+builtin_1.lse_1.cond_load.relax_udelay:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=UDELAY USE_SMP_COND_LOAD_RELAXED=1
 endif
 
 $(BUILD):
@@ -241,8 +301,15 @@ $(BUILD)/lh_%: tests/%.h include/atomics.h $(C_SRC) | $(BUILD)
 clean.builtin_0.lse_0:
 	$(MAKE) USE_BUILTIN=0 LSE_ENABLE=0 clean
 
+clean.builtin_0.lse_0.cond_load:
+	$(MAKE) USE_BUILTIN=0 LSE_ENABLE=0 USE_SMP_COND_LOAD_RELAXED=1 clean
+
 clean.builtin_1.lse_0:
 	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=0 clean
+
+clean.builtin_1.lse_0.cond_load:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=0 USE_SMP_COND_LOAD_RELAXED=1 clean
+
 
 ifeq ($(TARGET_ARCH),aarch64)
 clean.builtin_0.lse_1:
@@ -274,6 +341,37 @@ clean.builtin_1.lse_1.relax_ndelay:
 
 clean.builtin_1.lse_1.relax_udelay:
 	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=UDELAY clean
+
+
+clean.builtin_0.lse_1.cond_load:
+	$(MAKE) USE_BUILTIN=0 LSE_ENABLE=1 USE_SMP_COND_LOAD_RELAXED=1 clean
+
+clean.builtin_1.lse_1.cond_load:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 USE_SMP_COND_LOAD_RELAXED=1 clean
+
+clean.builtin_1.lse_1.cond_load.relax_yield:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=YIELD USE_SMP_COND_LOAD_RELAXED=1 clean
+
+clean.builtin_1.lse_1.cond_load.relax_isb:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=ISB USE_SMP_COND_LOAD_RELAXED=1 clean
+
+clean.builtin_1.lse_1.cond_load.relax_nop:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=NOP USE_SMP_COND_LOAD_RELAXED=1 clean
+
+clean.builtin_1.lse_1.cond_load.relax_empty:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=EMPTY USE_SMP_COND_LOAD_RELAXED=1 clean
+
+clean.builtin_1.lse_1.cond_load.relax_isb14:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=ISB14 USE_SMP_COND_LOAD_RELAXED=1 clean
+
+clean.builtin_1.lse_1.cond_load.relax_isbyield:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=ISBYIELD USE_SMP_COND_LOAD_RELAXED=1 clean
+
+clean.builtin_1.lse_1.cond_load.relax_ndelay:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=NDELAY USE_SMP_COND_LOAD_RELAXED=1 clean
+
+clean.builtin_1.lse_1.cond_load.relax_udelay:
+	$(MAKE) USE_BUILTIN=1 LSE_ENABLE=1 RELAX=UDELAY USE_SMP_COND_LOAD_RELAXED=1 clean
 endif
 
 

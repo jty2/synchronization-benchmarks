@@ -543,6 +543,7 @@ do {									\
 		if (cond_expr)						\
 			break;						\
 		__cmpwait_relaxed(__PTR, VAL);				\
+		INCREMENT_COUNTER(osq_lock_locked_spins);               \
 	}								\
 	VAL;								\
 })
@@ -581,7 +582,8 @@ do {									\
 		VAL = READ_ONCE(*__PTR);			\
 		if (cond_expr)					\
 			break;					\
-		cpu_relax();					\
+		CPU_RELAX(cpu_to_relax[thread_number][0]);      \
+		INCREMENT_COUNTER(osq_lock_locked_spins);       \
 	}							\
 	VAL;							\
 })
