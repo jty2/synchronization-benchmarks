@@ -47,10 +47,17 @@
 
 #include ATOMIC_TEST
 
-uint64_t test_lock = 0;
-uint64_t sync_lock = 0;
-uint64_t calibrate_lock = 0;
-uint64_t ready_lock = 0;
+typedef struct {
+uint64_t test_lock;
+uint64_t sync_lock;
+uint64_t calibrate_lock;
+uint64_t ready_lock;
+} lock_memory_t;
+
+lock_memory_t * locks = NULL;
+
+#define handle_error_en(en, msg) \
+    do { errno = en; perror(msg); exit(EXIT_FAILURE); } while (0)
 
 void* hmr(void *);
 
@@ -66,8 +73,16 @@ void print_usage (char *invoc) {
             "2: 2-way SMT pinning, 4: 4-way SMT pinning, may not work for multisocket]\n\t"
             "[-o <#:#:#:#> arbitrary pinning order separated by colon without space, "
             "command lstopo can be used to deduce the correct order]\n\t"
+            "[-f select<N>  for CMN HN-F select hash algorithm, 1-6 ]\n\t"
+            "[-H <#>  for which CMN HN-F to allocate lock variables]\n\t"
+            "[-F <#>  for how many candidate lock variable locations to try]\n\t"
             "[-- <more workload specific arguments>]\n", invoc);
 }
+
+
+// cmn-phys-mem.c
+int parse_cmn_hash_select_mode(const char * optarg);
+int mem_is_on_target(int select_mode, unsigned long target_select, void * p);
 
 int main(int argc, char** argv)
 {
@@ -79,27 +94,30 @@ int main(int argc, char** argv)
     unsigned long sched_elapsed = 0, real_elapsed = 0, realcpu_elapsed = 0;
     unsigned long start_ns = 0;
     double avg_lock_depth = 0.0;
+    size_t num_lock_memory_tries = 64;
+    int cmn_hash_select_mode = 0;
+    int target_hnf = 0;
 
     num_cores = sysconf(_SC_NPROCESSORS_ONLN);
 
     /* Set defaults for all command line options */
-    test_args args = { .nthrds = num_cores,
-                       .nacqrs = 50000,
-                       .ncrit = 0,
-                       .nparallel = 0,
-                       .ileave = 1,
-                       .safemode = 0,
-                       .pinorder = NULL };
+    test_args args = { .nthrds = num_cores, // -t
+                       .nacqrs = 50000,     // -a
+                       .ncrit = 0,          // -c
+                       .nparallel = 0,      // -p
+                       .ileave = 1,         // -i
+                       .safemode = 0,       // -s
+                       .pinorder = NULL };  // -o
 
     opterr = 0;
 
-    while ((opt = getopt(argc, argv, "t:a:c:p:i:o:s")) != -1)
+    while ((opt = getopt(argc, argv, "t:a:c:p:i:o:sf:H:F:")) != -1)
     {
         long optval = 0;
         int len = 0;
         char *csv = NULL;
         switch (opt) {
-          case 't':
+          case 't': // number of threads
             optval = strtol(optarg, (char **) NULL, 10);
             /* Do not allow number of threads to exceed online cores
                in order to prevent deadlock ... */
@@ -114,10 +132,11 @@ int main(int argc, char** argv)
                 args.nthrds = optval;
             }
             else {
+		        // XXX: the behavior described by this message is not implemented.
                 fprintf(stderr, "WARNING: limiting thread count to online cores (%ld).\n", num_cores);
             }
             break;
-          case 'a':
+          case 'a':	// iter
             optval = strtol(optarg, (char **) NULL, 10);
             if (optval < 0) {
                 fprintf(stderr, "ERROR: acquire count must be positive.\n");
@@ -127,15 +146,15 @@ int main(int argc, char** argv)
                 args.nacqrs = optval;
             }
             break;
-          case 'c':
+          case 'c':	// hold_unit
             // Set the units for loops
             len = strlen(optarg);
             if (optarg[len - 1] == 's') {
                 args.ncrit_units = NS;
             } else {
                 args.ncrit_units = INSTS;
-            } 
-            
+            }
+
             optval = strtol(optarg, (char **) NULL, 10);
             if (optval < 0) {
                 fprintf(stderr, "ERROR: critical iteration count must be positive.\n");
@@ -145,7 +164,7 @@ int main(int argc, char** argv)
                 args.ncrit = optval;
             }
             break;
-          case 'p':
+          case 'p':	// .post, .post_unit ns or insts
             // Set the units for loops
             len = strlen(optarg);
             if (optarg[len - 1] == 's') {
@@ -163,7 +182,7 @@ int main(int argc, char** argv)
                 args.nparallel = optval;
             }
             break;
-          case 'i':
+          case 'i':	// .ileave
             optval = strtol(optarg, (char **) NULL, 10);
             if (optval < 0) {
                 fprintf(stderr, "ERROR: core interleave must be positive.\n");
@@ -173,7 +192,7 @@ int main(int argc, char** argv)
                 args.ileave = optval;
             }
             break;
-          case 'o':
+          case 'o':	// pinorder
             args.pinorder = calloc(num_cores, sizeof(int));
             if (args.pinorder == NULL) {
                 fprintf(stderr, "ERROR: cannot allocate enough memory for pinorder structure.\n");
@@ -186,6 +205,8 @@ int main(int argc, char** argv)
                 optval = strtol(csv, (char **) NULL, 10);
                 /* Some Arm systems may have core number larger than total cores number */
                 args.pinorder[i] = optval;
+                // XXX: num_cores is the quantity of online cores, so this is not a reliable
+                // check if a specified core number is online or not.
                 if (optval < 0 || optval > num_cores) {
                     fprintf(stderr, "WARNING: core number %ld is out of range.\n", optval);
                 }
@@ -194,6 +215,15 @@ int main(int argc, char** argv)
             break;
           case 's':
             args.safemode = 1;
+            break;
+          case 'F': // number of lock structures to try to match HN-F
+            num_lock_memory_tries = strtol(optarg, (char **) NULL, 0);
+            break;
+          case 'f': // CMN Hash select mode
+            cmn_hash_select_mode = parse_cmn_hash_select_mode(optarg);
+            break;
+          case 'H':	// target HN-F number
+            target_hnf = strtol(optarg, (char **) NULL, 0);
             break;
           case '?':
           default:
@@ -204,12 +234,34 @@ int main(int argc, char** argv)
 
     parse_test_args(args, argc, argv);
 
+    int found_target = 0;
+
+    // align lock memory structure to a cache line
+    lock_memory_t * locks_all = aligned_alloc(64, num_lock_memory_tries * sizeof(lock_memory_t));
+    memset(locks_all, 0, num_lock_memory_tries * sizeof(lock_memory_t));    // allocate real memory
+
+    locks = locks_all;
+    if (cmn_hash_select_mode != 0) {
+            for (size_t i = 0; i < num_lock_memory_tries; i++) {
+                if (mem_is_on_target(cmn_hash_select_mode, target_hnf, &(locks_all[i]))) {
+                    locks = &(locks_all[i]);
+                    found_target = 1;
+                    printf("found CMN HN-F target at offset i=%zu\n", i);
+                    break;
+                }
+            }
+            if (! found_target) {
+                fprintf(stderr, "did not find an HNF target after %zu tries\n", num_lock_memory_tries);
+                exit(-1);
+            }
+    }
+
     double tickspns;
     pthread_t hmr_threads[args.nthrds];
     pthread_attr_t hmr_attr;
     unsigned long hmrs[args.nthrds];
-    unsigned long hmrtime[args.nthrds]; /* can't touch this */
-    unsigned long hmrrealtime[args.nthrds];
+    unsigned long hmrtime[args.nthrds]; /* can't touch this */	// CPU time ns
+    unsigned long hmrrealtime[args.nthrds];	// wall clock time ns
     unsigned long hmrdepth[args.nthrds];
     struct timespec tv_time;
 
@@ -228,17 +280,21 @@ int main(int argc, char** argv)
        no more than a few milliseconds and lockhammer should never be run
        on an already-deplayed system. */
 
-    pthread_attr_init(&hmr_attr);
+    int s = pthread_attr_init(&hmr_attr);
+    if (s) handle_error_en(s, "pthread_attr_init");
     if (!args.safemode) {
-        pthread_attr_setinheritsched(&hmr_attr, PTHREAD_EXPLICIT_SCHED);
-        pthread_attr_setschedpolicy(&hmr_attr, SCHED_FIFO);
+        s = pthread_attr_setinheritsched(&hmr_attr, PTHREAD_EXPLICIT_SCHED);
+        if (s) handle_error_en(s, "pthread_attr_setinheritsched");
+        s = pthread_attr_setschedpolicy(&hmr_attr, SCHED_FIFO);
+        if (s) handle_error_en(s, "pthread_attr_setschedpolicy");
         sparam.sched_priority = 1;
-        pthread_attr_setschedparam(&hmr_attr, &sparam);
+        s = pthread_attr_setschedparam(&hmr_attr, &sparam);
+        if (s) handle_error_en(s, "pthread_attr_setschedparam");
     }
 
-    initialize_lock(&test_lock, num_cores);
+    initialize_lock(&locks->test_lock, num_cores);
     // Get frequency of clock, and divide by 1B to get # of ticks per ns
-    tickspns = (double)timer_get_cnt_freq() / 1000000000.0; 
+    tickspns = (double)timer_get_cnt_freq() / 1000000000.0;
 
     thread_args t_args[args.nthrds];
     for (int i = 0; i < args.nthrds; ++i) {
@@ -247,12 +303,12 @@ int main(int argc, char** argv)
         t_args[i].nthrds = args.nthrds;
         t_args[i].ileave = args.ileave;
         t_args[i].iter = args.nacqrs;
-        t_args[i].lock = &test_lock;
-        t_args[i].rst = &hmrs[i];
-        t_args[i].nsec = &hmrtime[i];
-        t_args[i].real_nsec = &hmrrealtime[i];
-        t_args[i].depth = &hmrdepth[i];
-        t_args[i].nstart = &start_ns;
+        t_args[i].lock = &locks->test_lock;	// this is the main lock.
+        t_args[i].rst = &hmrs[i];	// nlocks, should be .iter
+        t_args[i].nsec = &hmrtime[i];	// CPU time
+        t_args[i].real_nsec = &hmrrealtime[i];	// wallclock time
+        t_args[i].depth = &hmrdepth[i];	// total_depth from lock implementation
+        t_args[i].nstart = &start_ns;	// only marshal thread does this.
         t_args[i].hold = args.ncrit;
         t_args[i].hold_unit = args.ncrit_units;
         t_args[i].post = args.nparallel;
@@ -260,11 +316,13 @@ int main(int argc, char** argv)
         t_args[i].tickspns = tickspns;
         t_args[i].pinorder = args.pinorder;
 
-        pthread_create(&hmr_threads[i], &hmr_attr, hmr, (void*)(&t_args[i]));
+        s = pthread_create(&hmr_threads[i], &hmr_attr, hmr, (void*)(&t_args[i]));
+        if (s)
+             handle_error_en(s, "pthread_create");
     }
 
     for (int i = 0; i < args.nthrds; ++i) {
-        result = pthread_join(hmr_threads[i], NULL);
+        result = pthread_join(hmr_threads[i], NULL);	// XXX: pthread_join returns error number, 0 on success
     }
     /* "Marshal" thread will collect start time once all threads have
         reported ready so we only need to collect the end time here */
@@ -275,9 +333,9 @@ int main(int argc, char** argv)
 
     result = 0;
     for (int i = 0; i < args.nthrds; ++i) {
-        result += hmrs[i];
-        sched_elapsed += hmrtime[i];
-        realcpu_elapsed += hmrrealtime[i];
+        result += hmrs[i];	// number of lockings, by thread
+        sched_elapsed += hmrtime[i];	// CPU time spent by thread
+        realcpu_elapsed += hmrrealtime[i];	// wallclock time spent by thread
         /* Average lock "depth" is an algorithm-specific auxiliary metric
            whereby each algorithm can report an approximation of the level
            of contention it observes.  This estimate is returned from each
@@ -288,13 +346,14 @@ int main(int argc, char** argv)
     }
 
     fprintf(stderr, "%ld lock loops\n", result);
-    fprintf(stderr, "%ld ns scheduled\n", sched_elapsed);
-    fprintf(stderr, "%ld ns elapsed (~%f cores)\n", real_elapsed, ((float) sched_elapsed / (float) real_elapsed));
+    fprintf(stderr, "%ld ns scheduled (sum of CPU time)\n", sched_elapsed);
+    fprintf(stderr, "%ld ns real elapsed (~%f cores)\n", real_elapsed, ((float) sched_elapsed / (float) real_elapsed));
     fprintf(stderr, "%lf ns per access (scheduled)\n", ((double) sched_elapsed)/ ((double) result));
     fprintf(stderr, "%lf ns per access (real)\n", ((double) realcpu_elapsed)/ ((double) result));
-    fprintf(stderr, "%lf ns access rate\n", ((double) real_elapsed) / ((double) result));
+    fprintf(stderr, "%lf ns access rate (wall clock time divided by total number of all lock attempts)\n", ((double) real_elapsed) / ((double) result));
     fprintf(stderr, "%lf average depth\n", avg_lock_depth);
 
+    printf("nthrds, sched_elapsed/real_elapsed, sched_elapsed/result, realcpu/result, real/result, avg_lock_depth\n");
     printf("%ld, %f, %lf, %lf, %lf, %lf\n",
            args.nthrds,
            ((float) sched_elapsed / (float) real_elapsed),
@@ -306,8 +365,8 @@ int main(int argc, char** argv)
     return 0;
 }
 
-/* Calculate timer spin-times where we do not access the clock.  
- * First calibrate the wait loop by doing a binary search around 
+/* Calculate timer spin-times where we do not access the clock.
+ * First calibrate the wait loop by doing a binary search around
  * an estimated number of ticks. All threads participate to take
  * into account pipeline effects of threading.
  */
@@ -323,7 +382,7 @@ static void calibrate_timer(thread_args *x, unsigned long mycore)
     }
 
     // Make sure to re-sync any stragglers
-    synchronize_threads(&calibrate_lock, x->nthrds);
+    synchronize_threads(&locks->calibrate_lock, x->nthrds);
 
     if (x->post_unit == NS) {
         unsigned long post = (unsigned long)((double)x->post * x->tickspns);
@@ -363,27 +422,33 @@ void* hmr(void *ptr)
     /* Coordinate synchronized start of all lock threads to maximize
        time under which locks are stressed to the requested contention
        level */
-    mycore = fetchadd64_acquire(&sync_lock, 2) >> 1;
+    mycore = fetchadd64_acquire(&locks->sync_lock, 2) >> 1;
 
     if (mycore == 0) {
         /* First core to register is a "marshal" who waits for subsequent
            cores to become ready and starts all cores with a write to the
            shared memory location */
-
-        /* Set affinity to core 0 */
-        CPU_SET(0, &affin_mask);
+        if (pinorder) {
+#ifdef DEBUG
+            printf("pinorder[%lu] = %d, locks->sync_lock = %lu\n", mycore, pinorder[mycore], locks->sync_lock);
+#endif
+            CPU_SET(pinorder[mycore], &affin_mask);
+        } else {
+            /* Set affinity to core 0 for first core in -i mode */
+            CPU_SET(0, &affin_mask);
+        }
         sched_setaffinity(0, sizeof(cpu_set_t), &affin_mask);
 
         /* Spin until the appropriate numer of threads have become ready */
-        wait64(&ready_lock, nthrds - 1);
-        fetchadd64_release(&sync_lock, 1);
+        wait64(&locks->ready_lock, nthrds - 1);
+        fetchadd64_release(&locks->sync_lock, 1);
 
         calibrate_timer(x, mycore);
         hold_count = x->hold;
         post_count = x->post;
 
-        /* Wait for all threads to arrive from calibrating. */ 
-        synchronize_threads(&calibrate_lock, nthrds);
+        /* Wait for all threads to arrive from calibrating. */
+        synchronize_threads(&locks->calibrate_lock, nthrds);
         clock_gettime(CLOCK_MONOTONIC, &tv_monot_start);
     } else {
         /*
@@ -395,6 +460,9 @@ void* hmr(void *ptr)
          * pinning order we want to change for specific -i interleave mode.
          */
         if (pinorder && pinorder[mycore]) {
+#ifdef DEBUG
+            printf("pinorder[%lu] = %d, locks->sync_lock = %lu\n", mycore, pinorder[mycore], locks->sync_lock);
+#endif
             CPU_SET(pinorder[mycore], &affin_mask);
             sched_setaffinity(0, sizeof(cpu_set_t), &affin_mask);
         } else { /* Calculate affinity mask for my core and set affinity */
@@ -432,10 +500,10 @@ void* hmr(void *ptr)
             sched_setaffinity(0, sizeof(cpu_set_t), &affin_mask);
         }
 
-        fetchadd64_release(&ready_lock, 1);
+        fetchadd64_release(&locks->ready_lock, 1);
 
         /* Spin until the "marshal" sets the appropriate bit */
-        wait64(&sync_lock, (nthrds * 2) | 1);
+        wait64(&locks->sync_lock, (nthrds * 2) | 1);
 
         /* All threads participate in calibration */
         calibrate_timer(x, mycore);
@@ -443,7 +511,7 @@ void* hmr(void *ptr)
         post_count = x->post;
 
         /* Wait for all threads to arrive from calibrating */
-        synchronize_threads(&calibrate_lock, nthrds);
+        synchronize_threads(&locks->calibrate_lock, nthrds);
     }
 
     thread_local_init(mycore);

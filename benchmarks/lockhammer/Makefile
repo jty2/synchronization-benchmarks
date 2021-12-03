@@ -69,7 +69,7 @@ endif
 
 ALL_BINARIES = $(addprefix $(BUILD)/,$(TEST_TARGETS))
 
-C_SRC = src/lockhammer.c
+C_SRC = src/lockhammer.c src/cmn-phys-mem.c
 
 all: $(BUILD) $(ALL_BINARIES)
 
